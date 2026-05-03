@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: battle_game
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d battle_game"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build: .
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      CORS_ORIGIN: "*"
+      LOG_LEVEL: info
+      SERVER_ID: compose-1
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/battle_game?schema=public
+      REDIS_URL: redis://redis:6379
+      MAX_ROOM_PLAYERS: 8
+      MIN_ROOM_PLAYERS: 2
+      GAME_TICK_RATE: 10
+      TURN_DURATION_MS: 10000
+      START_COUNTDOWN_MS: 3000
+      RECONNECT_GRACE_MS: 30000
+      ROOM_STATE_TTL_MS: 600000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres_data:

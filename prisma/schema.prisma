@@ -1,0 +1,191 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PlayerStatus {
+  OFFLINE
+  ONLINE
+  MATCHMAKING
+  IN_ROOM
+  IN_GAME
+}
+
+enum RoomStatus {
+  WAITING
+  STARTING
+  IN_PROGRESS
+  FINISHED
+  CANCELLED
+}
+
+enum RoomVisibility {
+  PUBLIC
+  PRIVATE
+}
+
+enum RoomPlayerStatus {
+  JOINED
+  READY
+  PLAYING
+  DISCONNECTED
+  ELIMINATED
+  LEFT
+}
+
+enum GamePhase {
+  LOBBY
+  COUNTDOWN
+  ACTIVE
+  RESOLVING
+  FINISHED
+}
+
+enum GameActionType {
+  ATTACK
+  DEFEND
+  SPECIAL
+  HEAL
+  PASS
+}
+
+enum GameActionStatus {
+  RECEIVED
+  APPLIED
+  DUPLICATE
+  REJECTED
+  EXPIRED
+}
+
+model Player {
+  id                 String       @id @default(uuid()) @db.Uuid
+  externalId         String?      @unique @db.VarChar(128)
+  displayName        String       @db.VarChar(48)
+  status             PlayerStatus @default(ONLINE)
+  rating             Int          @default(1000)
+  wins               Int          @default(0)
+  losses             Int          @default(0)
+  currentRoomId      String?      @db.Uuid
+  lastSeenAt         DateTime?    @db.Timestamptz(6)
+  createdAt          DateTime     @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime     @updatedAt @db.Timestamptz(6)
+
+  currentRoom        Room?        @relation("PlayerCurrentRoom", fields: [currentRoomId], references: [id], onDelete: SetNull)
+  ownedRooms         Room[]       @relation("RoomOwner")
+  roomMemberships    RoomPlayer[]
+  actions            GameAction[]
+
+  @@index([status])
+  @@index([rating])
+  @@index([currentRoomId])
+  @@map("players")
+}
+
+model Room {
+  id              String         @id @default(uuid()) @db.Uuid
+  code            String         @unique @db.VarChar(12)
+  status          RoomStatus     @default(WAITING)
+  visibility      RoomVisibility @default(PUBLIC)
+  maxPlayers      Int            @default(8)
+  minPlayers      Int            @default(2)
+  tickRate        Int            @default(10)
+  version         Int            @default(0)
+  ownerPlayerId   String?        @db.Uuid
+  createdAt       DateTime       @default(now()) @db.Timestamptz(6)
+  updatedAt       DateTime       @updatedAt @db.Timestamptz(6)
+  expiresAt       DateTime?      @db.Timestamptz(6)
+  startedAt       DateTime?      @db.Timestamptz(6)
+  endedAt         DateTime?      @db.Timestamptz(6)
+  metadata        Json           @default("{}")
+
+  owner           Player?        @relation("RoomOwner", fields: [ownerPlayerId], references: [id], onDelete: SetNull)
+  currentPlayers  Player[]       @relation("PlayerCurrentRoom")
+  participants    RoomPlayer[]
+  gameStates      GameState[]
+  actions         GameAction[]
+
+  @@index([status, visibility, createdAt])
+  @@index([ownerPlayerId])
+  @@map("rooms")
+}
+
+model RoomPlayer {
+  id                 String           @id @default(uuid()) @db.Uuid
+  roomId             String           @db.Uuid
+  playerId           String           @db.Uuid
+  status             RoomPlayerStatus @default(JOINED)
+  seatNumber         Int
+  teamNumber         Int?
+  health             Int              @default(100)
+  energy             Int              @default(0)
+  isReady            Boolean          @default(false)
+  lastProcessedSeq   Int              @default(0)
+  connectionId       String?          @db.VarChar(128)
+  reconnectTokenHash String?          @unique @db.VarChar(128)
+  joinedAt           DateTime         @default(now()) @db.Timestamptz(6)
+  lastSeenAt         DateTime?        @db.Timestamptz(6)
+  disconnectedAt     DateTime?        @db.Timestamptz(6)
+  leftAt             DateTime?        @db.Timestamptz(6)
+  createdAt          DateTime         @default(now()) @db.Timestamptz(6)
+  updatedAt          DateTime         @updatedAt @db.Timestamptz(6)
+
+  room               Room             @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  player             Player           @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, playerId])
+  @@unique([roomId, seatNumber])
+  @@index([roomId, status])
+  @@index([playerId, status])
+  @@map("room_players")
+}
+
+model GameState {
+  id          String    @id @default(uuid()) @db.Uuid
+  roomId      String    @db.Uuid
+  phase       GamePhase @default(LOBBY)
+  roundNumber Int       @default(0)
+  turnNumber  Int       @default(0)
+  tick        Int       @default(0)
+  version     Int       @default(0)
+  state       Json
+  checksum    String?   @db.VarChar(128)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @db.Timestamptz(6)
+
+  room        Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, version])
+  @@index([roomId, phase])
+  @@index([roomId, roundNumber, turnNumber])
+  @@map("game_states")
+}
+
+model GameAction {
+  id              String           @id @default(uuid()) @db.Uuid
+  roomId          String           @db.Uuid
+  playerId        String           @db.Uuid
+  actionId        String           @db.VarChar(80)
+  seq             Int
+  roundNumber     Int
+  turnNumber      Int
+  type            GameActionType
+  status          GameActionStatus @default(RECEIVED)
+  payload         Json
+  rejectionReason String?          @db.VarChar(255)
+  receivedAt      DateTime         @default(now()) @db.Timestamptz(6)
+  appliedAt       DateTime?        @db.Timestamptz(6)
+  serverVersion   Int?
+
+  room            Room             @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  player          Player           @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, playerId, actionId])
+  @@unique([roomId, playerId, seq])
+  @@index([roomId, roundNumber, turnNumber])
+  @@index([status, receivedAt])
+  @@map("game_actions")
+}
